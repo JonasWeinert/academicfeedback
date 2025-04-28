@@ -30,6 +30,24 @@ interface UsageMetadata {
     totalTokenCount?: number;
 }
 
+// Define interface for recommended papers
+interface Author {
+  authorId: string;
+  name: string;
+}
+
+interface RecommendedPaper {
+  paperId: string;
+  title: string;
+  abstract: string;
+  url: string;
+  venue: string;
+  year: number;
+  authors: Author[];
+  publicationDate?: string;
+  citationCount?: number;
+}
+
 // Define types for the new options
 type DocumentType = "proposal" | "paper_draft";
 type HarshnessLevel = "mild" | "tough" | "extremely_tough";
@@ -77,6 +95,11 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false); // State for drag-and-drop UI
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null); // For highlighting interaction
+
+  // New state for recommended papers
+  const [isLoadingPapers, setIsLoadingPapers] = useState<boolean>(false);
+  const [recommendedPapers, setRecommendedPapers] = useState<RecommendedPaper[]>([]);
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // New state for document type and harshness
   const [documentType, setDocumentType] = useState<DocumentType>('proposal');
@@ -188,8 +211,60 @@ export default function Home() {
       return;
     }
 
-    setIsLoadingFeedback(true); // Use specific loader
+    setIsLoadingPapers(true); // Start loading papers
+    setRecommendedPapers([]);
+    setSearchQuery('');
     setError(null);
+
+    try {
+      // First, get search terms from our new API
+      const searchTermsResponse = await fetch('/api/search-terms', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          markdownProposal,
+          documentType
+        }),
+      });
+
+      if (!searchTermsResponse.ok) {
+        throw new Error(`Failed to generate search terms: ${searchTermsResponse.status}`);
+      }
+
+      const searchTermsResult = await searchTermsResponse.json();
+      const searchTerms = searchTermsResult.searchTerms || [];
+
+      if (searchTerms.length > 0) {
+        // Get paper recommendations from OpenAlex
+        const papersResponse = await fetch('/api/open-alex', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            searchTerms
+          }),
+        });
+
+        if (papersResponse.ok) {
+          const papersResult = await papersResponse.json();
+          setRecommendedPapers(papersResult.papers || []);
+          setSearchQuery(papersResult.query || searchTerms[0] || '');
+        } else {
+          console.error('Failed to fetch papers:', await papersResponse.text());
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching paper recommendations:', err);
+      // Don't show errors for this part to the user, just log them
+    } finally {
+      setIsLoadingPapers(false);
+    }
+
+    // Now start the main feedback process
+    setIsLoadingFeedback(true); // Use specific loader
     setFeedback(null);
     setTokenUsage(null); // Clear previous usage
     setAiReasoning(null); // Clear previous reasoning
@@ -547,6 +622,119 @@ export default function Home() {
     }
   };
 
+  // Add this function to render recommended papers
+  const renderRecommendedPapers = () => {
+    // Changed condition to show papers during feedback generation and when papers are available
+    // Show the component when either papers are loading, feedback is loading, or we have papers to show
+    if (!isLoadingPapers && !isLoadingFeedback && recommendedPapers.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="mt-8 border border-blue-200 dark:border-blue-800 rounded-lg bg-blue-50/50 dark:bg-blue-900/20 overflow-hidden">
+        <div className="bg-blue-100 dark:bg-blue-800/50 px-4 py-3 border-b border-blue-200 dark:border-blue-700 flex items-center">
+          <svg className="w-5 h-5 text-blue-600 dark:text-blue-300 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+          </svg>
+          <h3 className="font-medium text-blue-800 dark:text-blue-200">
+            {isLoadingPapers ? 'Finding relevant papers...' : `While you wait for feedback, consider exploring these related papers:`}
+          </h3>
+        </div>
+        
+        <div className="p-4">
+          {isLoadingPapers ? (
+            <div className="space-y-4">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="animate-pulse flex space-x-4 w-full">
+                  <div className="flex-1 space-y-3 py-1">
+                    <div className="h-4 bg-blue-200 dark:bg-blue-700 rounded w-3/4"></div>
+                    <div className="h-3 bg-blue-200 dark:bg-blue-700 rounded w-1/2"></div>
+                    <div className="space-y-2">
+                      <div className="h-3 bg-blue-200 dark:bg-blue-700 rounded"></div>
+                      <div className="h-3 bg-blue-200 dark:bg-blue-700 rounded w-5/6"></div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">Loading recommended readings while your feedback is being prepared...</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {recommendedPapers.length === 0 ? (
+                <p className="text-sm text-gray-600 dark:text-gray-400">No relevant papers found.</p>
+              ) : (
+                <>
+                  <p className="text-xs text-blue-600 dark:text-blue-400 mb-2">
+                    {isLoadingFeedback 
+                      ? "Powered by OpenAlex" 
+                      : "We found these papers related to your document:"}
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {recommendedPapers.map((paper) => (
+                      <div key={paper.paperId} className="p-3 bg-white dark:bg-gray-800 shadow-sm rounded-lg border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
+                        <h4 className="font-medium text-sm">
+                          <a href={paper.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">
+                            {paper.title}
+                          </a>
+                        </h4>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center flex-wrap">
+                          {paper.authors.slice(0, 3).map(a => a.name).join(', ')}
+                          {paper.authors.length > 3 ? ', et al.' : ''}
+                          {paper.year ? (
+                            <span className="inline-flex items-center ml-2">
+                              <svg className="w-3 h-3 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                              </svg>
+                              {paper.year}
+                            </span>
+                          ) : null}
+                          {paper.citationCount ? (
+                            <span className="inline-flex items-center ml-2">
+                              <svg className="w-3 h-3 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path>
+                              </svg>
+                              {paper.citationCount}
+                            </span>
+                          ) : null}
+                        </p>
+                        {paper.venue && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center">
+                            <svg className="w-3 h-3 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                            </svg>
+                            {paper.venue}
+                          </p>
+                        )}
+                        {paper.abstract && (
+                          <p className="text-xs text-gray-600 dark:text-gray-300 mt-2 overflow-hidden h-10">
+                            {paper.abstract.length > 200 ? paper.abstract.substring(0, 200) + '...' : paper.abstract}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-2 text-right">
+                    <a 
+                      href={`https://explore.openalex.org/works?q=${encodeURIComponent(searchQuery)}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center"
+                    >
+                      View more results on OpenAlex
+                      <svg className="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                      </svg>
+                    </a>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 text-gray-900 dark:text-gray-100 font-[family-name:var(--font-geist-sans)]">
       <nav className="bg-white dark:bg-gray-800 shadow-md p-4 sticky top-0 z-20 border-b border-gray-200 dark:border-gray-700">
@@ -738,15 +926,17 @@ export default function Home() {
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Enter the criteria for assessing this document. What makes for excellent work? What should be penalized?</p>
               </div>
 
+              {renderRecommendedPapers()}
+
               <button
                 type="submit"
-                disabled={!markdownProposal || !assessmentGuidelines.trim() || isLoadingFeedback}
+                disabled={!markdownProposal || !assessmentGuidelines.trim() || isLoadingFeedback || isLoadingPapers}
                 className="mt-6 w-full sm:w-auto text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:ring-4 focus:ring-blue-300/50 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:from-blue-500 dark:to-indigo-500 dark:hover:from-blue-600 dark:hover:to-indigo-600 dark:focus:ring-blue-800/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-blue-600 disabled:hover:to-indigo-600 shadow-md hover:shadow-lg transition-all duration-300 flex items-center justify-center min-w-[200px]"
               >
-                {isLoadingFeedback ? (
+                {isLoadingFeedback || isLoadingPapers ? (
                   <>
                     <svg aria-hidden="true" role="status" className="inline w-4 h-4 me-3 text-white animate-spin" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="#E5E7EB"/><path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentColor"/></svg>
-                    Generating Feedback...
+                    {isLoadingPapers && !isLoadingFeedback ? "Finding Papers..." : "Generating Feedback..."}
                   </>
                 ) : (
                   <>
