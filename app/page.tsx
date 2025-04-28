@@ -850,9 +850,9 @@ export default function Home() {
                    </details>
                  ))}
                </div>
-             </div>
+             </div> 
 
-            {/* Annotated Proposal - Sidebar Layout */}
+            {/* Annotated Proposal - Sidebar Layouts */}
             <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
               <h3 className="font-semibold mb-3 text-base">Annotated Document & Feedback</h3>
               <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">Click on highlighted text or comments below to jump between them.</p>
