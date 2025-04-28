@@ -18,8 +18,7 @@
     "react-markdown": "^10.1.0",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
-    "string-similarity": "^4.0.4",
-    "@lightningcss/linux-x64-gnu": "^1.25.1"
+    "string-similarity": "^4.0.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
