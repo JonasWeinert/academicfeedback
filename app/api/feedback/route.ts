@@ -117,6 +117,7 @@ Here are your marking guidelines:`;
 
     console.log("Sending request to Gemini API...");
 
+    // First request to get the structured feedback
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: [
@@ -134,11 +135,14 @@ Here are your marking guidelines:`;
         responseMimeType: 'application/json',
         responseSchema: responseSchema,
         systemInstruction: fullSystemInstruction
-        // Note: responseMimeType is implicitly application/json when responseSchema is provided
       }
     });
 
     console.log("Received response from Gemini API.");
+    
+    // Log important parts for debugging
+    console.log("Response candidates:", response.candidates);
+    console.log("Response promptFeedback:", response.promptFeedback);
 
     try {
       // Find the first '{' and the last '}' to extract the JSON part
@@ -153,10 +157,42 @@ Here are your marking guidelines:`;
 
       const jsonString = responseText.substring(startIndex, endIndex + 1);
       const feedbackJson = JSON.parse(jsonString);
+      
+      // Make a second, separate request to get the reasoning
+      let aiReasoning = null;
+      try {
+        // Only make this request if we successfully got structured feedback
+        const reasoningResponse = await ai.models.generateContent({
+          model: MODEL_NAME,
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: `Given the following proposal, explain your thinking process for the feedback (but don't provide the feedback itself again):
+              
+${markdownProposal.substring(0, 5000)}... [truncated for brevity]` }]
+            }
+          ],
+          config: {
+            safetySettings: safetySettings,
+            temperature: 0.7,
+            topP: 0.95,
+            topK: 64,
+            maxOutputTokens: 2048,
+            systemInstruction: fullSystemInstruction
+          }
+        });
+        
+        aiReasoning = reasoningResponse.text || null;
+        console.log("Generated AI reasoning:", aiReasoning);
+      } catch (reasoningError) {
+        console.error("Error getting AI reasoning:", reasoningError);
+        // Don't fail the whole request if reasoning fails
+      }
 
       return NextResponse.json({
         feedback: feedbackJson,
-        usage: response.usageMetadata || {}
+        usage: response.usageMetadata || {},
+        reasoning: aiReasoning
       });
     } catch (parseError: any) { // Catch specific error types if needed
       console.error("Failed to parse JSON from Gemini API response:", parseError);
