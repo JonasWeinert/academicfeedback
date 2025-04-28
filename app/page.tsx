@@ -3,9 +3,6 @@
 import { useState, useCallback, ChangeEvent, FormEvent, DragEvent, useRef, useMemo, useEffect } from 'react';
 import Image from "next/image"; // Keep if needed, maybe for logo?
 import { findBestMatch } from 'string-similarity'; // Import for fuzzy matching
-import ReactMarkdown from 'react-markdown'; // Import for markdown rendering
-import rehypeRaw from 'rehype-raw';
-import remarkGfm from 'remark-gfm';
 
 // Define the structure of the feedback object based on the Gemini schema
 interface FeedbackPassage {
@@ -240,39 +237,7 @@ export default function Home() {
   // Memoize the processed proposal text and annotations to avoid re-computation
   const { annotatedProposalHtml, annotationData } = useMemo(() => {
     if (!markdownProposal || !feedback?.passages || feedback.passages.length === 0) {
-      return { 
-        annotatedProposalHtml: 
-          <div className="prose dark:prose-invert prose-headings:font-bold prose-headings:text-gray-800 dark:prose-headings:text-gray-200 prose-p:my-2 prose-li:my-0 prose-table:border-collapse max-w-none">
-            {markdownProposal ? 
-              <ReactMarkdown 
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  h1: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h1'>) => <h1 className="text-2xl font-bold mt-6 mb-3" {...props} />,
-                  h2: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h2'>) => <h2 className="text-xl font-bold mt-5 mb-3" {...props} />,
-                  h3: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h3'>) => <h3 className="text-lg font-bold mt-4 mb-2" {...props} />,
-                  p: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'p'>) => <p className="my-2" {...props} />,
-                  ul: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'ul'>) => <ul className="list-disc pl-5 my-2" {...props} />,
-                  ol: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'ol'>) => <ol className="list-decimal pl-5 my-2" {...props} />,
-                  li: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'li'>) => <li className="my-1" {...props} />,
-                  table: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'table'>) => <table className="border-collapse border border-gray-300 dark:border-gray-700 my-4" {...props} />,
-                  thead: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'thead'>) => <thead className="bg-gray-100 dark:bg-gray-800" {...props} />,
-                  tbody: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'tbody'>) => <tbody {...props} />,
-                  tr: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'tr'>) => <tr className="border-b border-gray-300 dark:border-gray-700" {...props} />,
-                  th: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'th'>) => <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-left" {...props} />,
-                  td: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'td'>) => <td className="border border-gray-300 dark:border-gray-700 px-4 py-2" {...props} />,
-                  a: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'a'>) => <a className="text-blue-600 dark:text-blue-400 hover:underline" {...props} />,
-                  blockquote: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'blockquote'>) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-700 pl-4 italic my-4" {...props} />,
-                  code: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'code'>) => <code className="bg-gray-100 dark:bg-gray-800 rounded px-1 py-0.5 font-mono text-sm" {...props} />,
-                  pre: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'pre'>) => <pre className="bg-gray-100 dark:bg-gray-800 rounded p-4 overflow-x-auto my-4 font-mono text-sm" {...props} />,
-                }}
-              >
-                {markdownProposal}
-              </ReactMarkdown>
-              : <p>No content to display</p>
-            }
-          </div>, 
-        annotationData: [] 
-      };
+      return { annotatedProposalHtml: <pre className="whitespace-pre-wrap break-words">{markdownProposal || ''}</pre>, annotationData: [] };
     }
 
     // Store original content
@@ -283,12 +248,18 @@ export default function Home() {
     const appliedAnnotations = new Set<string>();
 
     // Create a mapping for annotation IDs
-    const passageMap = new Map<string, { passage: FeedbackPassage, id: string }>();
+    const passageMap = new Map<string, {
+      passage: FeedbackPassage,
+      id: string
+    }>();
 
     // Prepare passages for advanced matching
     feedback.passages.forEach((passage, index) => {
       const id = `annotation-${index}`;
-      passageMap.set(passage.referenced_student_text_quote, { passage, id });
+      passageMap.set(passage.referenced_student_text_quote, {
+        passage,
+        id
+      });
     });
 
     // Function to find the best substring match
@@ -433,41 +404,60 @@ export default function Home() {
       return null; // No match found
     }
 
-    // Pre-process markdown - detect headings, lists, etc.
-    // This approach will preserve markdown structure
-    const enhancedMarkdown = markdownProposal
-      // Make sure ## headings have space after the #
-      .replace(/^(#+)([^#\s])/gm, '$1 $2')
-      // Ensure lists have proper spacing
-      .replace(/^(\s*[-*+])([^\s])/gm, '$1 $2')
-      .replace(/^(\s*\d+\.)([^\s])/gm, '$1 $2')
-      // Ensure paragraphs have line breaks
-      .replace(/([^\n])\n([^\n])/g, '$1\n\n$2');
+    // Apply highlighting to the text
+    let finalHtml = originalHtml;
+    let processedHtml = finalHtml;
+    let offset = 0; // Track offset changes due to HTML insertion
 
-    // Now we apply our annotation strategy
-    // Find all passage matches and create annotation info
+    // Process passages to annotate. Start with longer ones first.
     const sortedPassages = [...feedback.passages]
       .sort((a, b) => b.referenced_student_text_quote.length - a.referenced_student_text_quote.length);
 
-    // First, find all matches and build annotation data
     for (const passage of sortedPassages) {
       const quote = passage.referenced_student_text_quote;
       const info = passageMap.get(quote);
 
-      if (!info) continue;
+      if (!info) continue; // Skip if we can't find the info/id
 
-      const match = findBestSubstringMatch(quote, enhancedMarkdown);
+      // Use the *current* state of processedHtml for matching
+      const match = findBestSubstringMatch(quote, processedHtml);
 
-      if (match && match.similarity >= 0.7) {
-        // Store match info for annotation sidebar
-        matchedPassages.set(quote, { 
-          passage, 
-          id: info.id, 
-          startIndex: match.startIndex 
-        });
+      if (match && match.similarity >= 0.7) { // Require reasonable confidence
+        // Debug
+        console.log(`Found match for: "${quote.substring(0, 30)}..." with similarity ${match.similarity}`);
+
+        // Get the text we're going to wrap from the current processedHtml
+        const textToWrap = processedHtml.substring(match.startIndex, match.endIndex);
+        const startIdx = match.startIndex;
+        const endIdx = match.endIndex; // Use the matched end index
+
+        // Insert the highlighting span
+        const before = processedHtml.substring(0, startIdx);
+        const after = processedHtml.substring(endIdx);
+
+        const highlightedText = `<span id="text-${info.id}" data-annotation-id="${info.id}" class="annotation-highlight cursor-pointer transition-colors duration-200 ${activeAnnotationId === info.id ? 'bg-yellow-200 dark:bg-yellow-700/50' : 'bg-blue-100/50 dark:bg-blue-900/30 hover:bg-blue-200/70 dark:hover:bg-blue-800/50'} rounded px-1">${textToWrap}</span>`;
+
+        processedHtml = before + highlightedText + after;
+
+        // Store the match info including the start index relative to the *original* text (adjusting for offset changes isn't strictly necessary for sorting if we match on original)
+        // Let's try matching on the original text to get stable indices for sorting
+        const originalMatch = findBestSubstringMatch(quote, originalHtml);
+        const stableStartIndex = originalMatch ? originalMatch.startIndex : -1; // Fallback if original match fails
+
+        matchedPassages.set(quote, { passage, id: info.id, startIndex: stableStartIndex });
         appliedAnnotations.add(info.id);
+
+        // Update offset based on the length difference introduced by the span
+        // offset += highlightedText.length - textToWrap.length; // This becomes complex if matches overlap. Simpler to re-match on original for sorting index.
       }
     }
+
+    // Render the HTML with highlights
+    const renderedHtml = (
+      <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap break-words">
+        <div dangerouslySetInnerHTML={{ __html: processedHtml.replace(/\n/g, '<br />') }} />
+      </div>
+    );
 
     // Prepare sidebar data
     const matchedAnnotationsData = Array.from(matchedPassages.values()).map(info => ({
@@ -475,10 +465,10 @@ export default function Home() {
       feedback: info.passage.feedback,
       guideline: info.passage.quote_from_marking_guidelines,
       quote: info.passage.referenced_student_text_quote,
-      startIndex: info.startIndex
+      startIndex: info.startIndex // Keep track of position
     }));
 
-    // Get unmatched annotations
+    // Get unmatched annotations - assign a high start index so they appear last if sorted
     const unmatchedAnnotationsData = feedback.passages
       .filter(p => !matchedPassages.has(p.referenced_student_text_quote))
       .map((p, index) => ({
@@ -486,96 +476,19 @@ export default function Home() {
         feedback: p.feedback,
         guideline: p.quote_from_marking_guidelines,
         quote: p.referenced_student_text_quote,
-        startIndex: Infinity
+        startIndex: Infinity // Place unmatched annotations at the end
       }));
 
-    // Combine and sort annotations by their starting position
+    // Combine and sort annotations by their starting position in the original text
     const allAnnotations = [...matchedAnnotationsData, ...unmatchedAnnotationsData]
-      .sort((a, b) => a.startIndex - b.startIndex);
+        .sort((a, b) => a.startIndex - b.startIndex);
+
 
     console.log(`Matched ${matchedAnnotationsData.length} quotes, ${unmatchedAnnotationsData.length} unmatched`);
-    
-    // Custom renderer for the markdown with annotations
-    const AnnotatedMarkdownContent = () => {
-      // Create a component that will replace text nodes in the markdown
-      // with highlighted versions when they match annotations
-      const components = {
-        // Default styling for common markdown elements
-        h1: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h1'>) => <h1 className="text-2xl font-bold mt-6 mb-3" {...props} />,
-        h2: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h2'>) => <h2 className="text-xl font-bold mt-5 mb-3" {...props} />,
-        h3: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h3'>) => <h3 className="text-lg font-bold mt-4 mb-2" {...props} />,
-        p: ({node, children, ...props}: {node?: any, children?: React.ReactNode} & React.ComponentPropsWithoutRef<'p'>) => {
-          // For paragraphs, we need to check if they contain annotated text
-          return <p className="my-2" {...props}>{children}</p>;
-        },
-        ul: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'ul'>) => <ul className="list-disc pl-5 my-2" {...props} />,
-        ol: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'ol'>) => <ol className="list-decimal pl-5 my-2" {...props} />,
-        li: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'li'>) => <li className="my-1" {...props} />,
-        table: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'table'>) => <table className="border-collapse border border-gray-300 dark:border-gray-700 my-4" {...props} />,
-        thead: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'thead'>) => <thead className="bg-gray-100 dark:bg-gray-800" {...props} />,
-        tbody: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'tbody'>) => <tbody {...props} />,
-        tr: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'tr'>) => <tr className="border-b border-gray-300 dark:border-gray-700" {...props} />,
-        th: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'th'>) => <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-left" {...props} />,
-        td: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'td'>) => <td className="border border-gray-300 dark:border-gray-700 px-4 py-2" {...props} />,
-        a: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'a'>) => <a className="text-blue-600 dark:text-blue-400 hover:underline" {...props} />,
-        blockquote: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'blockquote'>) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-700 pl-4 italic my-4" {...props} />,
-        code: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'code'>) => <code className="bg-gray-100 dark:bg-gray-800 rounded px-1 py-0.5 font-mono text-sm" {...props} />,
-        pre: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'pre'>) => <pre className="bg-gray-100 dark:bg-gray-800 rounded p-4 overflow-x-auto my-4 font-mono text-sm" {...props} />,
-      };
-
-      // Directly iterate through sorted annotations and create spans for them
-      const textWithAnnotations = () => {
-        let result = enhancedMarkdown;
-        let offset = 0;
-        
-        // Need to sort in reverse order to maintain correct positions
-        const sortedMatchedAnnotations = [...matchedAnnotationsData]
-          .sort((a, b) => b.startIndex - a.startIndex);
-        
-        for (const anno of sortedMatchedAnnotations) {
-          const original = anno.quote;
-          // Get the actual text at the position
-          const actualText = enhancedMarkdown.substring(
-            anno.startIndex, 
-            Math.min(enhancedMarkdown.length, anno.startIndex + original.length + 20)
-          );
-          
-          // Create an HTML span for the annotation
-          const highlighted = `<span id="text-${anno.id}" data-annotation-id="${anno.id}" class="annotation-highlight cursor-pointer transition-colors duration-200 ${activeAnnotationId === anno.id ? 'bg-yellow-200 dark:bg-yellow-700/50' : 'bg-blue-100/50 dark:bg-blue-900/30 hover:bg-blue-200/70 dark:hover:bg-blue-800/50'} rounded px-1">${actualText.substring(0, original.length)}</span>`;
-          
-          // Replace in the markdown
-          result = 
-            result.substring(0, anno.startIndex + offset) + 
-            highlighted + 
-            result.substring(anno.startIndex + original.length + offset);
-          
-          // Update offset for next replacement
-          offset += highlighted.length - original.length;
-        }
-        
-        return result;
-      };
-      
-      // Generate the final markdown with annotations
-      const finalMarkdown = textWithAnnotations();
-      
-      // Render the markdown with our annotations included
-      return (
-        <div className="prose dark:prose-invert prose-headings:font-bold prose-headings:text-gray-800 dark:prose-headings:text-gray-200 prose-p:my-2 prose-li:my-0 prose-table:border-collapse max-w-none">
-          <ReactMarkdown 
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeRaw]}
-            components={components}
-          >
-            {finalMarkdown}
-          </ReactMarkdown>
-        </div>
-      );
-    };
 
     return {
-      annotatedProposalHtml: <AnnotatedMarkdownContent />,
-      annotationData: allAnnotations
+      annotatedProposalHtml: renderedHtml,
+      annotationData: allAnnotations // Use the sorted array
     };
   }, [markdownProposal, feedback, activeAnnotationId]);
 
@@ -940,13 +853,13 @@ export default function Home() {
              </div>
 
             {/* Annotated Proposal - Sidebar Layout */}
-            <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
               <h3 className="font-semibold mb-3 text-base">Annotated Document & Feedback</h3>
               <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">Click on highlighted text or comments below to jump between them.</p>
               <div className="flex flex-col md:flex-row gap-6">
                 {/* Proposal Text */}
                 <div ref={proposalTextRef} className="w-full md:w-2/3 lg:w-3/4 flex-shrink-0 border border-gray-200 dark:border-gray-700 rounded p-3 max-h-[70vh] overflow-y-auto">
-                  {annotatedProposalHtml}
+                   {annotatedProposalHtml}
                 </div>
                 {/* Annotations Sidebar */}
                 <div ref={annotationsSidebarRef} className="w-full md:w-1/3 lg:w-1/4 flex-shrink-0 space-y-3 max-h-[70vh] overflow-y-auto">
@@ -961,17 +874,17 @@ export default function Home() {
                       onMouseLeave={() => setActiveAnnotationId(null)}
                       className={`p-2 border rounded text-xs cursor-pointer transition-all duration-200 ${activeAnnotationId === anno.id ? 'ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-900/40' : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600/50'} ${anno.id.startsWith('unmatched-') ? 'border-dashed border-orange-400 dark:border-orange-600' : ''}`}
                     >
-                      {anno.id.startsWith('unmatched-') && (
-                        <p className="mb-1 font-medium text-orange-600 dark:text-orange-400">Unmatched Quote:</p>
-                      )}
-                      {anno.id.startsWith('unmatched-') && (
-                        <p className="mb-1 break-words italic text-gray-500 dark:text-gray-400">"{anno.quote}"</p>
-                      )}
+                        {anno.id.startsWith('unmatched-') && (
+                            <p className="mb-1 font-medium text-orange-600 dark:text-orange-400">Unmatched Quote:</p>
+                        )}
+                        {anno.id.startsWith('unmatched-') && (
+                          <p className="mb-1 break-words italic text-gray-500 dark:text-gray-400">"{anno.quote}"</p>
+                        )}
                       <p className="font-semibold">Feedback:</p>
                       <p className="mb-1">{anno.feedback}</p>
                       {anno.guideline && (
                         <p className="text-gray-500 dark:text-gray-400 mt-1 pt-1 border-t border-gray-200 dark:border-gray-600">
-                          <em>Guideline: {anno.guideline}</em>
+                            <em>Guideline: {anno.guideline}</em>
                         </p>
                       )}
                     </div>
