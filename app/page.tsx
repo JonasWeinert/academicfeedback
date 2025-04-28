@@ -3,6 +3,7 @@
 import { useState, useCallback, ChangeEvent, FormEvent, DragEvent, useRef, useMemo, useEffect } from 'react';
 import Image from "next/image"; // Keep if needed, maybe for logo?
 import { findBestMatch } from 'string-similarity'; // Import for fuzzy matching
+import { fetchWithApiKey } from "./utils/api";
 
 // Define the structure of the feedback object based on the Gemini schema
 interface FeedbackPassage {
@@ -218,7 +219,7 @@ export default function Home() {
 
     try {
       // First, get search terms from our new API
-      const searchTermsResponse = await fetch('/api/search-terms', {
+      const searchTermsResponse = await fetchWithApiKey('/api/search-terms', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -270,7 +271,7 @@ export default function Home() {
     setAiReasoning(null); // Clear previous reasoning
 
     try {
-      const response = await fetch('/api/feedback', {
+      const response = await fetchWithApiKey('/api/feedback', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

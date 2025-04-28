@@ -1,14 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from "@google/genai";
 
-const MODEL_NAME = "gemini-1.5-flash";
-const apiKey = process.env.GEMINI_API_KEY;
+const MODEL_NAME = "gemini-2.0-flash-lite";
 
-if (!apiKey) {
-  throw new Error("GEMINI_API_KEY environment variable is not set.");
-}
+// Function to get API key from request headers or environment variable
+const getApiKey = (request: NextRequest): string => {
+  // Get auth method from headers (if sent from client)
+  const authMethod = request.headers.get('x-auth-method');
+  const apiKeyFromRequest = request.headers.get('x-gemini-api-key');
+  
+  // Only use the API key from request if it exists and auth method is api_key
+  if (authMethod === 'api_key' && apiKeyFromRequest) {
+    return apiKeyFromRequest;
+  }
+  
+  // For password auth method or if no auth method specified, use env variable
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY environment variable is not set and no API key provided in request.");
+  }
+  
+  return apiKey;
+};
 
-const ai = new GoogleGenAI({apiKey: apiKey});
+// Initialize GoogleGenAI with the API key from parameters
+const initializeAI = (apiKey: string) => {
+  return new GoogleGenAI({apiKey});
+};
 
 // Helper function to extract main terms from a document text
 function extractBasicTerms(text: string): string[] {
@@ -67,6 +85,9 @@ export async function POST(request: NextRequest) {
     console.log("Sending request to Gemini API for search terms...");
     
     try {
+      const apiKey = getApiKey(request);
+      const ai = initializeAI(apiKey);
+      
       const response = await ai.models.generateContent({
         model: MODEL_NAME,
         contents: [

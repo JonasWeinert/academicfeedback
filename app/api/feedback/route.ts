@@ -9,13 +9,30 @@ import {
 
 const MODEL_NAME = "gemini-2.5-pro-preview-03-25";
 
-const apiKey = process.env.GEMINI_API_KEY;
+// Function to get API key from request headers or environment variable
+const getApiKey = (request: NextRequest): string => {
+  // Get auth method from headers (if sent from client)
+  const authMethod = request.headers.get('x-auth-method');
+  const apiKeyFromRequest = request.headers.get('x-gemini-api-key');
+  
+  // Only use the API key from request if it exists and auth method is api_key
+  if (authMethod === 'api_key' && apiKeyFromRequest) {
+    return apiKeyFromRequest;
+  }
+  
+  // For password auth method or if no auth method specified, use env variable
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY environment variable is not set and no API key provided in request.");
+  }
+  
+  return apiKey;
+};
 
-if (!apiKey) {
-  throw new Error("GEMINI_API_KEY environment variable is not set.");
-}
-
-const ai = new GoogleGenAI({apiKey: apiKey});
+// Initialize GoogleGenAI with the API key from parameters
+const initializeAI = (apiKey: string) => {
+  return new GoogleGenAI({apiKey});
+};
 
 const responseSchema = {
   type: Type.OBJECT,
@@ -135,6 +152,9 @@ Here are your marking guidelines:`;
 
 export async function POST(request: NextRequest) {
   try {
+    const apiKey = getApiKey(request);
+    const ai = initializeAI(apiKey);
+
     const { markdownProposal, assessmentGuidelines, documentType = "proposal", harshness = "tough" } = await request.json();
 
     if (!markdownProposal || !assessmentGuidelines) {
