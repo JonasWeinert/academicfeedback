@@ -3,6 +3,9 @@
 import { useState, useCallback, ChangeEvent, FormEvent, DragEvent, useRef, useMemo, useEffect } from 'react';
 import Image from "next/image"; // Keep if needed, maybe for logo?
 import { findBestMatch } from 'string-similarity'; // Import for fuzzy matching
+import ReactMarkdown from 'react-markdown'; // Import for markdown rendering
+import rehypeRaw from 'rehype-raw';
+import remarkGfm from 'remark-gfm';
 
 // Define the structure of the feedback object based on the Gemini schema
 interface FeedbackPassage {
@@ -29,6 +32,10 @@ interface UsageMetadata {
     candidatesTokenCount?: number;
     totalTokenCount?: number;
 }
+
+// Define types for the new options
+type DocumentType = "proposal" | "paper_draft";
+type HarshnessLevel = "mild" | "tough" | "extremely_tough";
 
 // Helper function to download JSON
 const downloadJson = (data: any, filename: string) => {
@@ -73,6 +80,10 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false); // State for drag-and-drop UI
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null); // For highlighting interaction
+
+  // New state for document type and harshness
+  const [documentType, setDocumentType] = useState<DocumentType>('proposal');
+  const [harshness, setHarshness] = useState<HarshnessLevel>('tough');
 
   // Refs for scrolling
   const feedbackRef = useRef<HTMLDivElement>(null);
@@ -172,7 +183,7 @@ export default function Home() {
   const handleGetFeedback = async (event: FormEvent) => {
     event.preventDefault();
     if (!markdownProposal) {
-      setError('Proposal text is missing. Please go back to step 1.');
+      setError('Document text is missing. Please go back to step 1.');
       return;
     }
     if (!assessmentGuidelines.trim()) {
@@ -192,7 +203,13 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ markdownProposal, assessmentGuidelines }),
+        // Include documentType and harshness in the request body
+        body: JSON.stringify({
+            markdownProposal,
+            assessmentGuidelines,
+            documentType,
+            harshness
+        }),
       });
 
       const result = await response.json();
@@ -223,7 +240,39 @@ export default function Home() {
   // Memoize the processed proposal text and annotations to avoid re-computation
   const { annotatedProposalHtml, annotationData } = useMemo(() => {
     if (!markdownProposal || !feedback?.passages || feedback.passages.length === 0) {
-      return { annotatedProposalHtml: <pre className="whitespace-pre-wrap break-words">{markdownProposal || ''}</pre>, annotationData: [] };
+      return { 
+        annotatedProposalHtml: 
+          <div className="prose dark:prose-invert prose-headings:font-bold prose-headings:text-gray-800 dark:prose-headings:text-gray-200 prose-p:my-2 prose-li:my-0 prose-table:border-collapse max-w-none">
+            {markdownProposal ? 
+              <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h1: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h1'>) => <h1 className="text-2xl font-bold mt-6 mb-3" {...props} />,
+                  h2: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h2'>) => <h2 className="text-xl font-bold mt-5 mb-3" {...props} />,
+                  h3: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h3'>) => <h3 className="text-lg font-bold mt-4 mb-2" {...props} />,
+                  p: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'p'>) => <p className="my-2" {...props} />,
+                  ul: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'ul'>) => <ul className="list-disc pl-5 my-2" {...props} />,
+                  ol: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'ol'>) => <ol className="list-decimal pl-5 my-2" {...props} />,
+                  li: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'li'>) => <li className="my-1" {...props} />,
+                  table: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'table'>) => <table className="border-collapse border border-gray-300 dark:border-gray-700 my-4" {...props} />,
+                  thead: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'thead'>) => <thead className="bg-gray-100 dark:bg-gray-800" {...props} />,
+                  tbody: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'tbody'>) => <tbody {...props} />,
+                  tr: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'tr'>) => <tr className="border-b border-gray-300 dark:border-gray-700" {...props} />,
+                  th: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'th'>) => <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-left" {...props} />,
+                  td: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'td'>) => <td className="border border-gray-300 dark:border-gray-700 px-4 py-2" {...props} />,
+                  a: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'a'>) => <a className="text-blue-600 dark:text-blue-400 hover:underline" {...props} />,
+                  blockquote: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'blockquote'>) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-700 pl-4 italic my-4" {...props} />,
+                  code: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'code'>) => <code className="bg-gray-100 dark:bg-gray-800 rounded px-1 py-0.5 font-mono text-sm" {...props} />,
+                  pre: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'pre'>) => <pre className="bg-gray-100 dark:bg-gray-800 rounded p-4 overflow-x-auto my-4 font-mono text-sm" {...props} />,
+                }}
+              >
+                {markdownProposal}
+              </ReactMarkdown>
+              : <p>No content to display</p>
+            }
+          </div>, 
+        annotationData: [] 
+      };
     }
 
     // Store original content
@@ -234,18 +283,12 @@ export default function Home() {
     const appliedAnnotations = new Set<string>();
 
     // Create a mapping for annotation IDs
-    const passageMap = new Map<string, {
-      passage: FeedbackPassage,
-      id: string
-    }>();
+    const passageMap = new Map<string, { passage: FeedbackPassage, id: string }>();
 
     // Prepare passages for advanced matching
     feedback.passages.forEach((passage, index) => {
       const id = `annotation-${index}`;
-      passageMap.set(passage.referenced_student_text_quote, {
-        passage,
-        id
-      });
+      passageMap.set(passage.referenced_student_text_quote, { passage, id });
     });
 
     // Function to find the best substring match
@@ -390,60 +433,41 @@ export default function Home() {
       return null; // No match found
     }
 
-    // Apply highlighting to the text
-    let finalHtml = originalHtml;
-    let processedHtml = finalHtml;
-    let offset = 0; // Track offset changes due to HTML insertion
+    // Pre-process markdown - detect headings, lists, etc.
+    // This approach will preserve markdown structure
+    const enhancedMarkdown = markdownProposal
+      // Make sure ## headings have space after the #
+      .replace(/^(#+)([^#\s])/gm, '$1 $2')
+      // Ensure lists have proper spacing
+      .replace(/^(\s*[-*+])([^\s])/gm, '$1 $2')
+      .replace(/^(\s*\d+\.)([^\s])/gm, '$1 $2')
+      // Ensure paragraphs have line breaks
+      .replace(/([^\n])\n([^\n])/g, '$1\n\n$2');
 
-    // Process passages to annotate. Start with longer ones first.
+    // Now we apply our annotation strategy
+    // Find all passage matches and create annotation info
     const sortedPassages = [...feedback.passages]
       .sort((a, b) => b.referenced_student_text_quote.length - a.referenced_student_text_quote.length);
 
+    // First, find all matches and build annotation data
     for (const passage of sortedPassages) {
       const quote = passage.referenced_student_text_quote;
       const info = passageMap.get(quote);
 
-      if (!info) continue; // Skip if we can't find the info/id
+      if (!info) continue;
 
-      // Use the *current* state of processedHtml for matching
-      const match = findBestSubstringMatch(quote, processedHtml);
+      const match = findBestSubstringMatch(quote, enhancedMarkdown);
 
-      if (match && match.similarity >= 0.7) { // Require reasonable confidence
-        // Debug
-        console.log(`Found match for: "${quote.substring(0, 30)}..." with similarity ${match.similarity}`);
-
-        // Get the text we're going to wrap from the current processedHtml
-        const textToWrap = processedHtml.substring(match.startIndex, match.endIndex);
-        const startIdx = match.startIndex;
-        const endIdx = match.endIndex; // Use the matched end index
-
-        // Insert the highlighting span
-        const before = processedHtml.substring(0, startIdx);
-        const after = processedHtml.substring(endIdx);
-
-        const highlightedText = `<span id="text-${info.id}" data-annotation-id="${info.id}" class="annotation-highlight cursor-pointer transition-colors duration-200 ${activeAnnotationId === info.id ? 'bg-yellow-200 dark:bg-yellow-700/50' : 'bg-blue-100/50 dark:bg-blue-900/30 hover:bg-blue-200/70 dark:hover:bg-blue-800/50'} rounded px-1">${textToWrap}</span>`;
-
-        processedHtml = before + highlightedText + after;
-
-        // Store the match info including the start index relative to the *original* text (adjusting for offset changes isn't strictly necessary for sorting if we match on original)
-        // Let's try matching on the original text to get stable indices for sorting
-        const originalMatch = findBestSubstringMatch(quote, originalHtml);
-        const stableStartIndex = originalMatch ? originalMatch.startIndex : -1; // Fallback if original match fails
-
-        matchedPassages.set(quote, { passage, id: info.id, startIndex: stableStartIndex });
+      if (match && match.similarity >= 0.7) {
+        // Store match info for annotation sidebar
+        matchedPassages.set(quote, { 
+          passage, 
+          id: info.id, 
+          startIndex: match.startIndex 
+        });
         appliedAnnotations.add(info.id);
-
-        // Update offset based on the length difference introduced by the span
-        // offset += highlightedText.length - textToWrap.length; // This becomes complex if matches overlap. Simpler to re-match on original for sorting index.
       }
     }
-
-    // Render the HTML with highlights
-    const renderedHtml = (
-      <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap break-words">
-        <div dangerouslySetInnerHTML={{ __html: processedHtml.replace(/\n/g, '<br />') }} />
-      </div>
-    );
 
     // Prepare sidebar data
     const matchedAnnotationsData = Array.from(matchedPassages.values()).map(info => ({
@@ -451,10 +475,10 @@ export default function Home() {
       feedback: info.passage.feedback,
       guideline: info.passage.quote_from_marking_guidelines,
       quote: info.passage.referenced_student_text_quote,
-      startIndex: info.startIndex // Keep track of position
+      startIndex: info.startIndex
     }));
 
-    // Get unmatched annotations - assign a high start index so they appear last if sorted
+    // Get unmatched annotations
     const unmatchedAnnotationsData = feedback.passages
       .filter(p => !matchedPassages.has(p.referenced_student_text_quote))
       .map((p, index) => ({
@@ -462,19 +486,96 @@ export default function Home() {
         feedback: p.feedback,
         guideline: p.quote_from_marking_guidelines,
         quote: p.referenced_student_text_quote,
-        startIndex: Infinity // Place unmatched annotations at the end
+        startIndex: Infinity
       }));
 
-    // Combine and sort annotations by their starting position in the original text
+    // Combine and sort annotations by their starting position
     const allAnnotations = [...matchedAnnotationsData, ...unmatchedAnnotationsData]
-        .sort((a, b) => a.startIndex - b.startIndex);
-
+      .sort((a, b) => a.startIndex - b.startIndex);
 
     console.log(`Matched ${matchedAnnotationsData.length} quotes, ${unmatchedAnnotationsData.length} unmatched`);
+    
+    // Custom renderer for the markdown with annotations
+    const AnnotatedMarkdownContent = () => {
+      // Create a component that will replace text nodes in the markdown
+      // with highlighted versions when they match annotations
+      const components = {
+        // Default styling for common markdown elements
+        h1: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h1'>) => <h1 className="text-2xl font-bold mt-6 mb-3" {...props} />,
+        h2: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h2'>) => <h2 className="text-xl font-bold mt-5 mb-3" {...props} />,
+        h3: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'h3'>) => <h3 className="text-lg font-bold mt-4 mb-2" {...props} />,
+        p: ({node, children, ...props}: {node?: any, children?: React.ReactNode} & React.ComponentPropsWithoutRef<'p'>) => {
+          // For paragraphs, we need to check if they contain annotated text
+          return <p className="my-2" {...props}>{children}</p>;
+        },
+        ul: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'ul'>) => <ul className="list-disc pl-5 my-2" {...props} />,
+        ol: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'ol'>) => <ol className="list-decimal pl-5 my-2" {...props} />,
+        li: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'li'>) => <li className="my-1" {...props} />,
+        table: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'table'>) => <table className="border-collapse border border-gray-300 dark:border-gray-700 my-4" {...props} />,
+        thead: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'thead'>) => <thead className="bg-gray-100 dark:bg-gray-800" {...props} />,
+        tbody: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'tbody'>) => <tbody {...props} />,
+        tr: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'tr'>) => <tr className="border-b border-gray-300 dark:border-gray-700" {...props} />,
+        th: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'th'>) => <th className="border border-gray-300 dark:border-gray-700 px-4 py-2 text-left" {...props} />,
+        td: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'td'>) => <td className="border border-gray-300 dark:border-gray-700 px-4 py-2" {...props} />,
+        a: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'a'>) => <a className="text-blue-600 dark:text-blue-400 hover:underline" {...props} />,
+        blockquote: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'blockquote'>) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-700 pl-4 italic my-4" {...props} />,
+        code: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'code'>) => <code className="bg-gray-100 dark:bg-gray-800 rounded px-1 py-0.5 font-mono text-sm" {...props} />,
+        pre: ({node, ...props}: {node?: any} & React.ComponentPropsWithoutRef<'pre'>) => <pre className="bg-gray-100 dark:bg-gray-800 rounded p-4 overflow-x-auto my-4 font-mono text-sm" {...props} />,
+      };
+
+      // Directly iterate through sorted annotations and create spans for them
+      const textWithAnnotations = () => {
+        let result = enhancedMarkdown;
+        let offset = 0;
+        
+        // Need to sort in reverse order to maintain correct positions
+        const sortedMatchedAnnotations = [...matchedAnnotationsData]
+          .sort((a, b) => b.startIndex - a.startIndex);
+        
+        for (const anno of sortedMatchedAnnotations) {
+          const original = anno.quote;
+          // Get the actual text at the position
+          const actualText = enhancedMarkdown.substring(
+            anno.startIndex, 
+            Math.min(enhancedMarkdown.length, anno.startIndex + original.length + 20)
+          );
+          
+          // Create an HTML span for the annotation
+          const highlighted = `<span id="text-${anno.id}" data-annotation-id="${anno.id}" class="annotation-highlight cursor-pointer transition-colors duration-200 ${activeAnnotationId === anno.id ? 'bg-yellow-200 dark:bg-yellow-700/50' : 'bg-blue-100/50 dark:bg-blue-900/30 hover:bg-blue-200/70 dark:hover:bg-blue-800/50'} rounded px-1">${actualText.substring(0, original.length)}</span>`;
+          
+          // Replace in the markdown
+          result = 
+            result.substring(0, anno.startIndex + offset) + 
+            highlighted + 
+            result.substring(anno.startIndex + original.length + offset);
+          
+          // Update offset for next replacement
+          offset += highlighted.length - original.length;
+        }
+        
+        return result;
+      };
+      
+      // Generate the final markdown with annotations
+      const finalMarkdown = textWithAnnotations();
+      
+      // Render the markdown with our annotations included
+      return (
+        <div className="prose dark:prose-invert prose-headings:font-bold prose-headings:text-gray-800 dark:prose-headings:text-gray-200 prose-p:my-2 prose-li:my-0 prose-table:border-collapse max-w-none">
+          <ReactMarkdown 
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeRaw]}
+            components={components}
+          >
+            {finalMarkdown}
+          </ReactMarkdown>
+        </div>
+      );
+    };
 
     return {
-      annotatedProposalHtml: renderedHtml,
-      annotationData: allAnnotations // Use the sorted array
+      annotatedProposalHtml: <AnnotatedMarkdownContent />,
+      annotationData: allAnnotations
     };
   }, [markdownProposal, feedback, activeAnnotationId]);
 
@@ -534,9 +635,9 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-[family-name:var(--font-geist-sans)]">
-      <nav className="bg-white dark:bg-gray-800 shadow-sm p-4 sticky top-0 z-20">
-        <h1 className="text-xl font-bold text-center">Academic Feedback Assistant</h1>
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 text-gray-900 dark:text-gray-100 font-[family-name:var(--font-geist-sans)]">
+      <nav className="bg-white dark:bg-gray-800 shadow-md p-4 sticky top-0 z-20 border-b border-gray-200 dark:border-gray-700">
+        <h1 className="text-xl font-bold text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400">Academic Feedback Assistant</h1>
       </nav>
 
       {/* Use more screen width */}
@@ -547,25 +648,25 @@ export default function Home() {
             <li className={`flex md:w-full items-center ${step >= 1 ? 'text-blue-600 dark:text-blue-500' : ''} sm:after:content-[''] after:w-full after:h-1 after:border-b after:border-gray-200 after:border-1 after:hidden sm:after:inline-block after:mx-6 xl:after:mx-10 dark:after:border-gray-700`}>
               <span className="flex items-center after:content-['/'] sm:after:hidden after:mx-2 after:text-gray-200 dark:after:text-gray-500">
                 {step > 1 ? (
-                  <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 me-2.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20"><path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5Zm3.707 8.207-4 4a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L9 10.586l3.293-3.293a1 1 0 0 1 1.414 1.414Z"/></svg>
+                  <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 me-2.5 text-blue-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20"><path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5Zm3.707 8.207-4 4a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L9 10.586l3.293-3.293a1 1 0 0 1 1.414 1.414Z"/></svg>
                 ) : (
-                  <span className={`me-2 ${step === 1 ? 'border border-blue-600 rounded-full w-6 h-6 flex items-center justify-center' : ''}`}>{step === 1 ? '1' : ''}</span>
+                  <span className={`me-2 ${step === 1 ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 rounded-full w-6 h-6 flex items-center justify-center shadow-sm' : ''}`}>{step === 1 ? '1' : ''}</span>
                 )}
-                 Upload <span className="hidden sm:inline-flex sm:ms-2">Proposal</span>
+                 Upload <span className="hidden sm:inline-flex sm:ms-2">Document</span>
               </span>
             </li>
             <li className={`flex md:w-full items-center ${step >= 2 ? 'text-blue-600 dark:text-blue-500' : ''} after:content-[''] after:w-full after:h-1 after:border-b after:border-gray-200 after:border-1 after:hidden sm:after:inline-block after:mx-6 xl:after:mx-10 dark:after:border-gray-700`}>
                <span className="flex items-center after:content-['/'] sm:after:hidden after:mx-2 after:text-gray-200 dark:after:text-gray-500">
                 {step > 2 ? (
-                    <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 me-2.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20"><path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5Zm3.707 8.207-4 4a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L9 10.586l3.293-3.293a1 1 0 0 1 1.414 1.414Z"/></svg>
+                    <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4 me-2.5 text-blue-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20"><path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5Zm3.707 8.207-4 4a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L9 10.586l3.293-3.293a1 1 0 0 1 1.414 1.414Z"/></svg>
                 ) : (
-                    <span className={`me-2 ${step === 2 ? 'border border-blue-600 rounded-full w-6 h-6 flex items-center justify-center' : ''}`}>{step === 2 ? '2' : ''}</span>
+                    <span className={`me-2 ${step === 2 ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 rounded-full w-6 h-6 flex items-center justify-center shadow-sm' : ''}`}>{step === 2 ? '2' : ''}</span>
                 )}
-                Set <span className="hidden sm:inline-flex sm:ms-2">Guidelines</span>
+                Set <span className="hidden sm:inline-flex sm:ms-2">Options</span>
                </span>
             </li>
             <li className={`flex items-center ${step === 3 ? 'text-blue-600 dark:text-blue-500' : ''}`}>
-             <span className={`me-2 ${step === 3 ? 'border border-blue-600 rounded-full w-6 h-6 flex items-center justify-center' : ''}`}>{step === 3 ? '3' : ''}</span>
+             <span className={`me-2 ${step === 3 ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 rounded-full w-6 h-6 flex items-center justify-center shadow-sm' : ''}`}>{step === 3 ? '3' : ''}</span>
               View <span className="hidden sm:inline-flex sm:ms-2">Feedback</span>
             </li>
           </ol>
@@ -573,23 +674,23 @@ export default function Home() {
 
         {/* Error Display */}
         {error && (
-          <div className="mb-6 p-4 text-sm text-red-800 rounded-lg bg-red-100 dark:bg-red-900 dark:text-red-300 border border-red-300 dark:border-red-600" role="alert">
+          <div className="mb-6 p-4 text-sm text-red-800 rounded-lg bg-red-100 dark:bg-red-900/40 dark:text-red-300 border border-red-300 dark:border-red-700 shadow-sm backdrop-blur-sm" role="alert">
             <span className="font-medium">Error:</span> {error}
           </div>
         )}
 
         {/* Step 1: Upload PDF with Drag and Drop */}
         {step === 1 && (
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-            <h2 className="text-lg font-semibold mb-4">Step 1: Upload Your Proposal (PDF)</h2>
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 transition-all duration-300">
+            <h2 className="text-xl font-semibold mb-6 bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">Upload Your Document (PDF)</h2>
             <form onSubmit={handleUploadAndOCR}>
-               {/* Sexy Upload Zone */}
+               {/* Enhanced Upload Zone */}
               <div
                 onDragEnter={handleDragEnter}
                 onDragLeave={handleDragLeave}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
-                className={`flex flex-col items-center justify-center w-full h-64 border-2 ${isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-300 dark:border-gray-600'} border-dashed rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-200 relative`}
+                className={`flex flex-col items-center justify-center w-full h-72 border-2 ${isDragging ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-900/30' : 'border-gray-300 dark:border-gray-600'} border-dashed rounded-xl cursor-pointer bg-gray-50/80 dark:bg-gray-700/60 hover:bg-gray-100/80 dark:hover:bg-gray-600/70 transition-all duration-300 relative backdrop-blur-sm ${file ? 'border-green-500 dark:border-green-600 bg-green-50/50 dark:bg-green-900/20' : ''}`}
                >
                 <input
                     id="file-upload"
@@ -599,20 +700,37 @@ export default function Home() {
                     onChange={(e) => handleFileChange(e.target.files ? e.target.files[0] : null)}
                  />
                 <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center px-4 pointer-events-none">
-                   <svg className={`w-10 h-10 mb-4 ${isDragging ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg>
-                   <p className={`mb-2 text-sm ${isDragging ? 'text-blue-700 dark:text-blue-300' : 'text-gray-500 dark:text-gray-400'}`}>
-                     <span className="font-semibold">Click to upload</span> or drag and drop
-                   </p>
-                   <p className="text-xs text-gray-500 dark:text-gray-400">PDF only (MAX 50MB)</p>
-                   {file && <p className="mt-2 text-sm font-medium text-green-600 dark:text-green-400">Selected: {file.name}</p>}
+                   {file ? (
+                     <div className="flex flex-col items-center">
+                       <div className="w-16 h-16 mb-4 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+                         <svg className="w-8 h-8 text-green-600 dark:text-green-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                         </svg>
+                       </div>
+                       <p className="text-lg font-medium text-green-600 dark:text-green-400">File selected</p>
+                       <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">{file.name}</p>
+                     </div>
+                   ) : (
+                     <>
+                       <div className={`w-16 h-16 mb-4 rounded-full flex items-center justify-center ${isDragging ? 'bg-blue-100 dark:bg-blue-900/30' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                         <svg className={`w-8 h-8 ${isDragging ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                           <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                         </svg>
+                       </div>
+                       <p className={`text-lg font-medium ${isDragging ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
+                         <span className="font-semibold">Click to upload</span> or drag and drop
+                       </p>
+                       <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">PDF only (MAX 50MB)</p>
+                     </>
+                   )}
                  </div>
               </div>
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-300">Drop a PDF file or click the area above to select one.</p>
+              <p className="mt-3 text-xs text-gray-500 dark:text-gray-400 italic">Your document stays on your device - processing happens in your browser</p>
 
               <button
                 type="submit"
                 disabled={!file || isLoadingOcr}
-                className="mt-6 w-full sm:w-auto text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                className="mt-6 w-full sm:w-auto text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:ring-4 focus:ring-blue-300/50 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:from-blue-500 dark:to-indigo-500 dark:hover:from-blue-600 dark:hover:to-indigo-600 dark:focus:ring-blue-800/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-blue-600 disabled:hover:to-indigo-600 shadow-md hover:shadow-lg transition-all duration-300 flex items-center justify-center min-w-[200px]"
               >
                 {isLoadingOcr ? (
                   <>
@@ -620,7 +738,12 @@ export default function Home() {
                     Processing PDF...
                   </>
                 ) : (
-                  'Upload & Process PDF'
+                  <>
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                    </svg>
+                    Process Document
+                  </>
                 )}
               </button>
             </form>
@@ -629,47 +752,117 @@ export default function Home() {
 
         {/* Step 2: Enter Guidelines */}
         {step === 2 && (
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-            <h2 className="text-lg font-semibold mb-4">Step 2: Define Assessment Guidelines</h2>
-            <form onSubmit={handleGetFeedback}>
-              <div className="mb-4">
-                <label htmlFor="assessment-guidelines" className="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Assessment Guidelines</label>
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 space-y-6 transition-all duration-300">
+            <h2 className="text-xl font-semibold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">Configure Feedback</h2>
+            <form onSubmit={handleGetFeedback} className="space-y-8">
+
+             {/* Document Type Selector - Enhanced */}
+             <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm">
+                <label className="block mb-3 text-sm font-medium text-gray-900 dark:text-white">Document Type</label>
+                <div className="flex rounded-md shadow-sm">
+                   <button
+                      type="button"
+                      onClick={() => setDocumentType('proposal')}
+                      className={`px-5 py-2.5 text-sm font-medium rounded-l-lg border focus:z-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${documentType === 'proposal' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600 border-gray-300 dark:border-gray-600'}`}
+                   >
+                      <div className="flex items-center">
+                        <svg className={`w-4 h-4 mr-2 ${documentType === 'proposal' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z"/>
+                        </svg>
+                        Thesis Proposal
+                      </div>
+                   </button>
+                   <button
+                      type="button"
+                      onClick={() => setDocumentType('paper_draft')}
+                      className={`px-5 py-2.5 text-sm font-medium rounded-r-lg border focus:z-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${documentType === 'paper_draft' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600 border-gray-300 dark:border-gray-600'} border-l-0`}
+                   >
+                      <div className="flex items-center">
+                        <svg className={`w-4 h-4 mr-2 ${documentType === 'paper_draft' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd"/>
+                        </svg>
+                        Paper Draft
+                      </div>
+                   </button>
+                </div>
+             </div>
+
+             {/* Harshness Level Selector - Enhanced */}
+             <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm">
+                 <label className="block mb-3 text-sm font-medium text-gray-900 dark:text-white">Feedback Harshness</label>
+                 <div className="grid grid-cols-3 gap-2">
+                   {[
+                     { value: 'mild', label: 'Mild', icon: 'M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M7 16a7 7 0 1114 0h-7M13 20h-2a2 2 0 00-2 2v3a2 2 0 002 2h2a2 2 0 002-2v-3a2 2 0 00-2-2z' },
+                     { value: 'tough', label: 'Tough', icon: 'M8 15.5a7.5 7.5 0 1115 0 7.5 7.5 0 01-15 0z M19 10l.01 0M14 10l.01 0M8 10l.01 0M3 10l.01 0M14 20H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v12a2 2 0 01-2 2z' },
+                     { value: 'extremely_tough', label: 'Extremely Tough', icon: 'M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01' }
+                   ].map((level, index) => (
+                       <button
+                          key={level.value}
+                          type="button"
+                          onClick={() => setHarshness(level.value as HarshnessLevel)}
+                          className={`flex flex-col items-center justify-center px-5 py-2.5 text-sm font-medium border rounded-lg focus:z-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${harshness === level.value ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-600 border-gray-300 dark:border-gray-600'}`}
+                       >
+                          <svg className={`w-6 h-6 mb-2 ${harshness === level.value ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={level.icon}></path>
+                          </svg>
+                          {level.label.replace('_', ' ')}
+                       </button>
+                   ))}
+                 </div>
+             </div>
+
+              <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm">
+                <label htmlFor="assessment-guidelines" className="block mb-3 text-sm font-medium text-gray-900 dark:text-white">Assessment Guidelines</label>
                 <textarea
                   id="assessment-guidelines"
-                  rows={10}
+                  rows={8}
                   value={assessmentGuidelines}
                   onChange={(e) => setAssessmentGuidelines(e.target.value)}
-                  className="block p-2.5 w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 font-[family-name:var(--font-geist-mono)]"
+                  className="block p-2.5 w-full text-sm text-gray-900 bg-white rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 font-[family-name:var(--font-geist-mono)] shadow-sm"
                   placeholder="Enter the guidelines the AI should use for marking the proposal..."
                   required
                 ></textarea>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Enter the criteria for assessing this document. What makes for excellent work? What should be penalized?</p>
               </div>
-              <div className="flex flex-col sm:flex-row gap-4 justify-between items-center">
-                 <button
-                    type="button"
-                    onClick={() => { setStep(1); setError(null); setFile(null); setMarkdownProposal(''); }}
-                    className="w-full sm:w-auto text-gray-900 bg-white border border-gray-300 hover:bg-gray-100 focus:ring-4 focus:ring-gray-100 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:hover:bg-gray-700 dark:hover:border-gray-600 dark:focus:ring-gray-700"
-                 >
-                    Back to Upload
-                 </button>
-                <button
-                  type="submit"
-                  disabled={isLoadingFeedback || !assessmentGuidelines.trim()}
-                  className="w-full sm:w-auto text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                >
-                  {isLoadingFeedback ? (
-                    <>
-                      <svg aria-hidden="true" role="status" className="inline w-4 h-4 me-3 text-white animate-spin" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="#E5E7EB"/><path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentColor"/></svg>
-                      Generating Feedback...
-                    </>
-                   ) : 'Get Feedback'}
-                </button>
-              </div>
-               <details className="mt-6">
-                  <summary className="cursor-pointer text-sm text-gray-600 dark:text-gray-400 hover:underline">Show Extracted Proposal Text (Markdown)</summary>
-                  <pre className="mt-2 p-3 bg-gray-100 dark:bg-gray-700 rounded text-xs overflow-auto max-h-60 whitespace-pre-wrap break-words font-[family-name:var(--font-geist-mono)]">
-                    {markdownProposal || "No proposal text extracted yet."}
-                  </pre>
+
+              <button
+                type="submit"
+                disabled={!markdownProposal || !assessmentGuidelines.trim() || isLoadingFeedback}
+                className="mt-6 w-full sm:w-auto text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:ring-4 focus:ring-blue-300/50 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:from-blue-500 dark:to-indigo-500 dark:hover:from-blue-600 dark:hover:to-indigo-600 dark:focus:ring-blue-800/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-blue-600 disabled:hover:to-indigo-600 shadow-md hover:shadow-lg transition-all duration-300 flex items-center justify-center min-w-[200px]"
+              >
+                {isLoadingFeedback ? (
+                  <>
+                    <svg aria-hidden="true" role="status" className="inline w-4 h-4 me-3 text-white animate-spin" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="#E5E7EB"/><path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentColor"/></svg>
+                    Generating Feedback...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                    </svg>
+                    Generate Feedback
+                  </>
+                )}
+              </button>
+
+               <details className="mt-8 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+                  <summary className="cursor-pointer p-4 flex items-center justify-between text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                    <div className="flex items-center">
+                      <svg className="w-5 h-5 mr-2 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                      </svg>
+                      View Extracted Document Text
+                    </div>
+                    <svg className="w-5 h-5 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                  </summary>
+                  <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+                    <pre className="p-3 bg-gray-50 dark:bg-gray-700/70 rounded text-xs overflow-auto max-h-60 whitespace-pre-wrap break-words font-[family-name:var(--font-geist-mono)] text-gray-800 dark:text-gray-300">
+                      {markdownProposal || "No document text extracted yet."}
+                    </pre>
+                  </div>
                </details>
             </form>
           </div>
@@ -747,13 +940,13 @@ export default function Home() {
              </div>
 
             {/* Annotated Proposal - Sidebar Layout */}
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-              <h3 className="font-semibold mb-3 text-base">Annotated Proposal & Feedback</h3>
+            <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+              <h3 className="font-semibold mb-3 text-base">Annotated Document & Feedback</h3>
               <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">Click on highlighted text or comments below to jump between them.</p>
               <div className="flex flex-col md:flex-row gap-6">
                 {/* Proposal Text */}
                 <div ref={proposalTextRef} className="w-full md:w-2/3 lg:w-3/4 flex-shrink-0 border border-gray-200 dark:border-gray-700 rounded p-3 max-h-[70vh] overflow-y-auto">
-                   {annotatedProposalHtml}
+                  {annotatedProposalHtml}
                 </div>
                 {/* Annotations Sidebar */}
                 <div ref={annotationsSidebarRef} className="w-full md:w-1/3 lg:w-1/4 flex-shrink-0 space-y-3 max-h-[70vh] overflow-y-auto">
@@ -763,22 +956,22 @@ export default function Home() {
                     <div
                       key={anno.id}
                       id={`comment-${anno.id}`}
-                      onClick={() => handleAnnotationInteraction(anno.id.startsWith('unmatched-') ? null : anno.id)}
+                      onClick={() => handleAnnotationInteraction(anno.id)}
                       onMouseEnter={() => !anno.id.startsWith('unmatched-') && setActiveAnnotationId(anno.id)}
                       onMouseLeave={() => setActiveAnnotationId(null)}
                       className={`p-2 border rounded text-xs cursor-pointer transition-all duration-200 ${activeAnnotationId === anno.id ? 'ring-2 ring-blue-500 bg-blue-50 dark:bg-blue-900/40' : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600/50'} ${anno.id.startsWith('unmatched-') ? 'border-dashed border-orange-400 dark:border-orange-600' : ''}`}
                     >
-                        {anno.id.startsWith('unmatched-') && (
-                            <p className="mb-1 font-medium text-orange-600 dark:text-orange-400">Unmatched Quote:</p>
-                        )}
-                        {anno.id.startsWith('unmatched-') && (
-                          <p className="mb-1 break-words italic text-gray-500 dark:text-gray-400">"{anno.quote}"</p>
-                        )}
+                      {anno.id.startsWith('unmatched-') && (
+                        <p className="mb-1 font-medium text-orange-600 dark:text-orange-400">Unmatched Quote:</p>
+                      )}
+                      {anno.id.startsWith('unmatched-') && (
+                        <p className="mb-1 break-words italic text-gray-500 dark:text-gray-400">"{anno.quote}"</p>
+                      )}
                       <p className="font-semibold">Feedback:</p>
                       <p className="mb-1">{anno.feedback}</p>
                       {anno.guideline && (
                         <p className="text-gray-500 dark:text-gray-400 mt-1 pt-1 border-t border-gray-200 dark:border-gray-600">
-                            <em>Guideline: {anno.guideline}</em>
+                          <em>Guideline: {anno.guideline}</em>
                         </p>
                       )}
                     </div>

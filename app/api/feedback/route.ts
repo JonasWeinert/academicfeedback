@@ -22,17 +22,17 @@ const responseSchema = {
   properties: {
     overall_feedback: {
       type: Type.STRING,
-      description: "General assessment of the proposal, summarizing strengths and weaknesses."
+      description: "General assessment of the document, summarizing strengths and weaknesses."
     },
     passages: {
       type: Type.ARRAY,
-      description: "Specific feedback points linked to exact text passages from the proposal.",
+      description: "Specific feedback points linked to exact text passages from the document.",
       items: {
         type: Type.OBJECT,
         properties: {
           referenced_student_text_quote: {
             type: Type.STRING,
-            description: "The exact, full quote from the student's proposal being commented on. Do not use ellipses."
+            description: "The exact, full quote from the student's document being commented on. Do not use ellipses."
           },
           feedback: {
             type: Type.STRING,
@@ -97,23 +97,51 @@ const safetySettings = [
   { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
 ];
 
+// Helper function to get the appropriate prompt based on document type and harshness
+function getSystemPrompt(documentType: string, harshness: string, guidelines: string) {
+  // Base prompt parts
+  let rolePrefix = "You are a professor that provides feedback on ";
+  let documentDescription = documentType === "proposal" 
+    ? "a first year phd student's thesis proposal" 
+    : "an academic paper draft";
+  
+  // Harshness level text
+  let harshnessText;
+  switch (harshness) {
+    case "mild":
+      harshnessText = "Be constructive and encouraging in your feedback while still pointing out areas for improvement.";
+      break;
+    case "tough":
+      harshnessText = "Be constructive but firm in your feedback, applying high academic standards.";
+      break;
+    case "extremely_tough":
+      harshnessText = "Be very hard but constructive in your feedback, applying the highest academic standards. Be nit-picky and detail-oriented.";
+      break;
+    default:
+      harshnessText = "Be constructive in your feedback applying high academic standards.";
+  }
+  
+  // Construct the full prompt
+  const baseSystemInstruction = `${rolePrefix}${documentDescription}.
+
+${harshnessText}
+
+Please provide overall feedback plus sentence/paragraph specific annotations. For the annotations, please reference the FULL quote from the document that your annotation belongs to. Do NOT abbreviate with ... in between. ALWAYS return the full quote.
+
+Here are your marking guidelines:`;
+
+  return `${baseSystemInstruction}\n\n${guidelines}`;
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const { markdownProposal, assessmentGuidelines } = await request.json();
+    const { markdownProposal, assessmentGuidelines, documentType = "proposal", harshness = "tough" } = await request.json();
 
     if (!markdownProposal || !assessmentGuidelines) {
-      return NextResponse.json({ error: 'Missing proposal or guidelines' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing document text or guidelines' }, { status: 400 });
     }
 
-    const baseSystemInstruction = `You are a professor that provides feedback on a first year phd students thesis proposal.
-
-Be very hard but constructive in your feedback applying highest academic standards.
-
-Please provide overall feedback plus sentence/ paragraph specific annotations. For the annotations, please reference the FULL quote from the student proposal that your annotation belongs to. Do NOT abbreviate with ... in between. ALWAYS return the full quote.
-
-Here are your marking guidelines:`;
-    const fullSystemInstruction = `${baseSystemInstruction}\n\n${assessmentGuidelines}`;
+    const fullSystemInstruction = getSystemPrompt(documentType, harshness, assessmentGuidelines);
 
     console.log("Sending request to Gemini API...");
 
@@ -167,7 +195,7 @@ Here are your marking guidelines:`;
           contents: [
             {
               role: "user",
-              parts: [{ text: `Given the following proposal, explain your thinking process for the feedback (but don't provide the feedback itself again):
+              parts: [{ text: `Given the following ${documentType === "proposal" ? "proposal" : "academic paper draft"}, explain your thinking process for the feedback (but don't provide the feedback itself again):
               
 ${markdownProposal.substring(0, 5000)}... [truncated for brevity]` }]
             }
