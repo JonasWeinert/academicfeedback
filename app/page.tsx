@@ -638,7 +638,7 @@ export default function Home() {
                    )}
                  </div>
               </div>
-              <p className="mt-3 text-xs text-gray-500 dark:text-gray-400 italic">Your document stays on your device - processing happens in your browser</p>
+              <p className="mt-3 text-xs text-gray-500 dark:text-gray-400 italic">Your document will be processed using Mistral OCR</p>
 
               <button
                 type="submit"
